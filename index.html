@@ -301,6 +301,11 @@
     opacity: 0; transition: opacity .15s;
   }
   .history-item:hover .history-enter { opacity: 1; }
+  .history-empty {
+    padding: 20px 18px; background: var(--fill-2); border-radius: var(--r);
+    font-size: 13px; color: var(--ink-4); text-align: center;
+    border: 1px dashed var(--line-soft);
+  }
 
   /* ============ 项目主页 ============ */
   #projectView { min-height: 100vh; }
@@ -403,6 +408,23 @@
   body.mode-mine .schedule-cell.on { background: var(--blue); }
   body.mode-mine .schedule-cell:hover { background: var(--blue-softer); }
   body.mode-mine .schedule-cell.on:hover { background: var(--blue-hover); }
+  /* 手机上：浏览态竖向可滚页面，横向拖动归我们处理；编辑态全部归涂色 */
+  body.mode-mine .schedule-cell { touch-action: pan-y; }
+  body.mode-mine.edit-mode .schedule-cell { touch-action: none; }
+
+  body:not(.mode-mine) .edit-toggle { display: none; }
+  .edit-toggle {
+    margin-left: auto;
+    padding: 6px 14px; border-radius: 999px;
+    font-size: 12px; font-weight: 500;
+    border: 1px solid var(--line-soft);
+    background: var(--card); color: var(--ink-3);
+    cursor: pointer; transition: all .15s;
+  }
+  .edit-toggle.active {
+    background: var(--blue-soft); color: var(--blue);
+    border-color: transparent; font-weight: 600;
+  }
 
   body.mode-summary .schedule-cell { cursor: default; }
   body.mode-summary .schedule-cell:hover { box-shadow: inset 0 0 0 2px var(--ink-2); position: relative; z-index: 1; }
@@ -633,6 +655,7 @@
       <span class="conn-status offline" id="connStatusProject">未连接</span>
     </div>
     <div class="topbar-right">
+      <button class="btn-ghost" id="homeBtn">‹ 首页</button>
       <button class="btn-ghost" id="shareBtn">🔗 邀请</button>
       <div class="user-info">
         <div class="user-avatar" id="userAvatar"></div>
@@ -648,6 +671,7 @@
       <button class="mode-tab active" data-mode="mine">我的标记</button>
       <button class="mode-tab" data-mode="summary">全员汇总</button>
       <span class="online-badge" id="onlineAvatars" hidden></span>
+      <button class="edit-toggle" id="editToggle">✏️ 编辑</button>
     </div>
 
     <div class="grid-wrap" id="gridWrap">
@@ -986,8 +1010,11 @@ function renderHistory() {
   const ids = Object.keys(all).sort((a,b) => new Date(all[b].createdAt) - new Date(all[a].createdAt));
   const block = document.getElementById("historyBlock");
   const list = document.getElementById("historyList");
-  if (ids.length === 0) { block.hidden = true; return; }
   block.hidden = false;
+  if (ids.length === 0) {
+    list.innerHTML = `<div class="history-empty">还没有项目 — 从上方创建一个，或点开别人分享的邀请链接加入。</div>`;
+    return;
+  }
   list.innerHTML = ids.slice(0, 10).map(id => {
     const p = all[id];
     const dateDesc = p.dates.length <= 3
@@ -1046,6 +1073,27 @@ async function createProject() {
     }
   }
   enterProject(id);
+}
+
+/* ============================================================
+   返回首页
+   ============================================================ */
+function goHome() {
+  // 停掉实时订阅和心跳
+  if (roomChannel && sb) { try { sb.removeChannel(roomChannel); } catch(_){} roomChannel = null; }
+  if (presenceTimer) { clearInterval(presenceTimer); presenceTimer = null; }
+  if (presencePollTimer) { clearInterval(presencePollTimer); presencePollTimer = null; }
+  if (uploadTimer) { clearTimeout(uploadTimer); uploadTimer = null; uploadMySlots(); }
+  app.view = "create";
+  app.projectId = null;
+  app.project = null;
+  document.getElementById("projectView").hidden = true;
+  document.getElementById("createView").hidden = false;
+  try { history.replaceState(null, "", location.pathname + location.search); }
+  catch(_) { location.hash = ""; }
+  window.scrollTo(0, 0);
+  renderHistory();
+  updateConnStatus();
 }
 
 /* ============================================================
@@ -1109,7 +1157,10 @@ async function joinRoom(id) {
         const n = payload.new && payload.new.user_name;
         if (!n) return;
         setSlots(app.project, n, (payload.new.slots) || []);
-        if (app.projectId === id) renderProject();
+        if (app.projectId !== id) return;
+        // 自己的改动会通过 Realtime 回传（回声），本地已是最新状态，跳过以免重渲染吞掉操作
+        if (n === app.currentUser) return;
+        updateRemoteCells(n);
       }
     )
     .on("postgres_changes",
@@ -1235,8 +1286,26 @@ function renderGrid() {
       <div class="time-label">${min2t(t)}</div>${cells}
     </div>`;
   }).join("");
+  const wrap = document.getElementById("gridWrap");
+  const st = wrap.scrollTop, sl = wrap.scrollLeft;
   table.innerHTML = header + rows;
+  wrap.scrollTop = st; wrap.scrollLeft = sl;
   bindGridInteraction();
+}
+
+// 远程他人更新：只改受影响的单元格样式，不重建 DOM（避免闪动/滚动跳位/吞点击）
+function updateRemoteCells(name) {
+  const table = document.getElementById("scheduleTable");
+  if (!table || !app.project) return;
+  if (app.mode === "summary") {
+    table.querySelectorAll(".schedule-cell").forEach(cell => {
+      const { count, total } = cellCount(cell.dataset.date, cell.dataset.slot);
+      const lv = heatLevel(count, total);
+      for (let i = 0; i <= 5; i++) cell.classList.toggle("h" + i, i === lv);
+    });
+  }
+  renderParticipants();
+  renderBestSlots();
 }
 
 function cellCount(ds, si) {
@@ -1268,7 +1337,17 @@ function setMode(mode) {
 /* ============================================================
    网格交互
    ============================================================ */
-const gridDrag = { active: false, paintValue: true, bound: false, mode: null };
+const gridDrag = { active: false, paintValue: true, bound: false, mode: null, pendingTap: null };
+// 编辑态：桌面(鼠标)默认开；手机默认浏览态，点「编辑」开拖动涂色
+let editMode = window.matchMedia ? window.matchMedia("(pointer: fine)").matches : true;
+
+function updateEditToggle() {
+  const b = document.getElementById("editToggle");
+  if (!b) return;
+  b.textContent = editMode ? "完成" : "✏️ 编辑";
+  b.classList.toggle("active", editMode);
+  document.body.classList.toggle("edit-mode", editMode);
+}
 function bindGridInteraction() {
   const wrap = document.getElementById("gridWrap");
   if (!gridDrag.bound || gridDrag.mode !== app.mode) {
@@ -1277,6 +1356,7 @@ function bindGridInteraction() {
     wrap.onpointerdown = onDown;
     wrap.onpointermove = onMove;
     wrap.onpointerup = onUp;
+    wrap.onpointercancel = onUp;
     wrap.onpointerleave = onUp;
   }
 }
@@ -1318,6 +1398,11 @@ function onDown(e) {
   if (app.mode === "summary") { showPopover(cell); return; }
   if (app.mode !== "mine") return;
   if (!app.currentUser) { showToast("请先输入你的名字"); switchUser(); return; }
+  // 手机浏览态：不立即涂色，等抬起时判断是「轻点」还是「滑动看表」
+  if (e.pointerType === "touch" && !editMode) {
+    gridDrag.pendingTap = { x: e.clientX, y: e.clientY, cell, key: cell.dataset.date + "|" + cell.dataset.slot, moved: false };
+    return;
+  }
   e.preventDefault();
   gridDrag.active = true;
   const wrap = document.getElementById("gridWrap");
@@ -1329,6 +1414,11 @@ function onDown(e) {
 }
 
 function onMove(e) {
+  if (gridDrag.pendingTap) {
+    const t = gridDrag.pendingTap;
+    if (Math.abs(e.clientX - t.x) > 12 || Math.abs(e.clientY - t.y) > 12) gridDrag.pendingTap = null;
+    return;
+  }
   if (!gridDrag.active) {
     if (app.mode === "summary" && e.pointerType !== "touch") {
       const cell = (e.target || cellAtPoint(e)).closest(".schedule-cell");
@@ -1341,6 +1431,19 @@ function onMove(e) {
 }
 
 function onUp(e) {
+  if (gridDrag.pendingTap) {
+    const t = gridDrag.pendingTap;
+    gridDrag.pendingTap = null;
+    // 只有「轻点且未滑动」才切换格子；滑动/滚动不算
+    if (e.type === "pointerup" && !t.moved) {
+      const mine = app.project.participants[app.currentUser] && app.project.participants[app.currentUser][t.key];
+      applyCell(t.cell, !mine);
+      renderBestSlots();
+      if (uploadTimer) { clearTimeout(uploadTimer); uploadTimer = null; }
+      uploadMySlots();
+    }
+    return;
+  }
   if (gridDrag.active) {
     gridDrag.active = false;
     try { const w = document.getElementById("gridWrap"); w.releasePointerCapture(e.pointerId); } catch(_){}
@@ -1580,6 +1683,12 @@ function bindEvents() {
   });
   document.getElementById("createBtn").addEventListener("click", createProject);
   document.getElementById("switchUserBtn").addEventListener("click", switchUser);
+  document.getElementById("homeBtn").addEventListener("click", goHome);
+  document.getElementById("editToggle").addEventListener("click", () => {
+    editMode = !editMode;
+    updateEditToggle();
+    showToast(editMode ? "编辑模式：拖动可连续涂色" : "浏览模式：随意滑动表格，点一下格子切换", 1800);
+  });
   document.querySelectorAll(".mode-tab").forEach(t => {
     t.addEventListener("click", () => { setMode(t.dataset.mode); });
   });
@@ -1597,6 +1706,7 @@ function bindEvents() {
   initConfigPanel();
   initShare();
   renderHistory();
+  updateEditToggle();
   updateConnStatus();
 
   // 如果有配置，静默测试连接
