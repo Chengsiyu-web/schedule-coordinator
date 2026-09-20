@@ -461,6 +461,8 @@
   }
   body.day-mode .schedule-cell.on { background: var(--blue); }
   body.day-mode .schedule-row { height: var(--day-cell-h, 44px); }
+  /* 骑线标签要压在表头之上（表头 z-index 3），否则起始时间被盖住 */
+  body.day-mode .time-label { z-index: 4; }
   /* 骑线式时间标签：时间压在边线上，表达"格子 = 两条线之间的时段" */
   body.day-mode .time-label span {
     position: absolute; top: 0; right: 8px; transform: translateY(-50%);
@@ -1350,9 +1352,9 @@ function timeSlots() {
 /* ============================================================
    网格渲染
    ============================================================ */
-// 手机 + 超过4天：切换为「日期条 + 单日大格子」模式，格子高度自适应铺满一屏，拖动涂色零冲突
+// 手机上「我的标记」一律用「日期条 + 单日大格子」模式（不再限制天数），格子高度自适应铺满一屏
 function isDayMode() {
-  return app.mode === "mine" && app.project && app.project.dates.length > 4 && window.innerWidth < 700;
+  return app.mode === "mine" && app.project && window.innerWidth < 700;
 }
 
 function renderGrid() {
