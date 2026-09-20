@@ -461,8 +461,17 @@
   }
   body.day-mode .schedule-cell.on { background: var(--blue); }
   body.day-mode .schedule-row { height: var(--day-cell-h, 44px); }
+  /* 骑线式时间标签：时间压在边线上，表达"格子 = 两条线之间的时段" */
+  body.day-mode .time-label span {
+    position: absolute; top: 0; right: 8px; transform: translateY(-50%);
+    background: var(--fill-2); padding: 2px 5px; border-radius: 5px;
+    font-size: 10px; line-height: 1.2; color: var(--ink-5);
+  }
+  body.day-mode .schedule-row.day-end { height: 0; border-bottom: none; overflow: visible; }
+  body.day-mode .schedule-row.day-end .time-label { height: 0; background: transparent; border-right-color: transparent; }
+  body.day-mode .schedule-row.day-end .schedule-cell { height: 0; border: none; }
   /* 单日模式：表格宽度=屏幕宽度，横向彻底锁死（纵向留兜底） */
-  body.day-mode #gridWrap { overflow-x: hidden; overflow-y: auto; }
+  body.day-mode #gridWrap { overflow-x: hidden; overflow-y: auto; padding-bottom: 10px; }
   body.day-mode #scheduleTable { width: 100%; max-width: 340px; min-width: 0; margin: 0 auto; }
 
   /* 全天有空快捷键 */
@@ -1387,7 +1396,7 @@ function renderGrid() {
       }).join("")}
     </div>`;
   }
-  const rows = slots.map((t, si) => {
+  let rows = slots.map((t, si) => {
     const cells = days.map((ds) => {
       const key = ds + "|" + si;
       let cls = "schedule-cell";
@@ -1400,9 +1409,13 @@ function renderGrid() {
       return `<div class="${cls}" data-date="${ds}" data-slot="${si}"></div>`;
     }).join("");
     return `<div class="schedule-row">
-      <div class="time-label">${min2t(t)}</div>${cells}
+      <div class="time-label"><span>${min2t(t)}</span></div>${cells}
     </div>`;
   }).join("");
+  if (dayMode) {
+    // 结束时间骑在最底部边线上（与起始时间对称，表达时段区间语义）
+    rows += `<div class="schedule-row day-end"><div class="time-label"><span>${p.timeEnd}</span></div></div>`;
+  }
   const wrap = document.getElementById("gridWrap");
   const st = wrap.scrollTop, sl = wrap.scrollLeft;
   table.innerHTML = header + rows;
