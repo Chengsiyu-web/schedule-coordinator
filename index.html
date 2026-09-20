@@ -537,6 +537,32 @@
   .slot-time { font-size: 14px; font-weight: 500; color: var(--ink); letter-spacing: -0.01em; }
   .slot-people { font-size: 12px; color: var(--ink-3); }
   .best-slot.full .slot-people { color: var(--blue); font-weight: 500; }
+  /* 按天分组的最佳时段（手风琴） */
+  .best-day {
+    border: 1px solid var(--line-soft); border-radius: 12px; overflow: hidden;
+    background: var(--card);
+  }
+  .best-day + .best-day { margin-top: 8px; }
+  .best-day-head {
+    display: flex; align-items: center; gap: 8px;
+    padding: 11px 12px; cursor: pointer; user-select: none; -webkit-user-select: none;
+  }
+  .best-day-title { font-size: 14px; font-weight: 600; color: var(--ink); letter-spacing: -0.01em; }
+  .best-day-title .wd { font-size: 11px; color: var(--ink-4); font-weight: 400; margin-left: 3px; }
+  .best-day-meta { margin-left: auto; font-size: 11px; color: var(--ink-4); }
+  .best-arrow {
+    width: 16px; text-align: center; color: var(--ink-4); font-size: 14px;
+    transition: transform .15s ease;
+  }
+  .best-day.open .best-arrow { transform: rotate(90deg); }
+  .best-day-body { display: none; padding: 0 12px 10px; flex-direction: column; gap: 4px; }
+  .best-day.open .best-day-body { display: flex; }
+  .best-range {
+    display: flex; justify-content: space-between; align-items: center;
+    font-size: 13px; color: var(--ink-2); font-variant-numeric: tabular-nums;
+    background: var(--blue-soft); border-radius: 8px; padding: 7px 10px;
+  }
+  .best-range .range-len { color: var(--blue); font-size: 11px; font-weight: 500; }
   .slot-bar { grid-column: 1 / -1; height: 4px; background: var(--line-soft); border-radius: 2px; overflow: hidden; margin-top: 2px; }
   .slot-bar-fill { height: 100%; background: var(--blue); border-radius: 2px; }
 
@@ -747,7 +773,7 @@
     </div>
 
     <div class="best-slots-block">
-      <div class="block-title">最佳时段 <span class="hint">按空闲人数排序</span></div>
+      <div class="block-title">最佳时段 <span class="hint">仅显示全员有空 · 点日期展开</span></div>
       <div class="best-slots-list" id="bestSlotsList"></div>
     </div>
 
@@ -1725,41 +1751,63 @@ function renderBestSlots() {
   const slots = timeSlots();
   const names = Object.keys(p.participants);
   const list = document.getElementById("bestSlotsList");
-  if (names.length === 0) {
+  if (!list) return;
+  // 「全员」= 有标记的参与人（一个格都没涂的人不算入全员，避免永远为空）
+  const marked = names.filter(n => Object.keys(p.participants[n] || {}).some(k => p.participants[n][k]));
+  if (marked.length === 0) {
     list.innerHTML = `<div style="font-size:13px;color:var(--ink-4);padding:8px 0">暂无参与人标记，涂色后将自动计算</div>`;
     return;
   }
-  const results = [];
+  const total = marked.length;
+  // 按天聚合：只保留存在「全员有空」时段的日子
+  const dayRows = [];
   p.dates.forEach(ds => {
+    const fullIdx = [];
     slots.forEach((t, si) => {
       const { count } = cellCount(ds, si);
-      results.push({ ds, si, count, t });
+      if (count >= total) fullIdx.push(si);
+    });
+    if (fullIdx.length) dayRows.push({ ds, fullIdx });
+  });
+  if (dayRows.length === 0) {
+    list.innerHTML = `<div style="font-size:13px;color:var(--ink-4);padding:8px 0">还没有全员都有空的时段，大家可以再调整标记</div>`;
+    return;
+  }
+  // 全员时段多的日子排前面，同数按日期先后
+  dayRows.sort((a, b) => b.fullIdx.length - a.fullIdx.length || a.ds.localeCompare(b.ds));
+  app.bestOpen = app.bestOpen || {};
+  list.innerHTML = dayRows.map(r => {
+    const d = fromYmd(r.ds);
+    const open = !!app.bestOpen[r.ds];
+    const ranges = [];
+    r.fullIdx.forEach(si => {
+      const last = ranges[ranges.length - 1];
+      if (last && last.si + last.len === si) { last.len++; last.endT += p.precision; }
+      else ranges.push({ si, len: 1, startT: slots[si], endT: slots[si] + p.precision });
+    });
+    const rangesHtml = ranges.map(m => {
+      const timeStr = min2t(m.startT) + "–" + (m.endT >= 1440 ? "24:00" : min2t(m.endT));
+      const mins = m.len * p.precision;
+      const h = Math.floor(mins / 60), mm = mins % 60;
+      const dur = h ? (mm ? h + "小时" + mm + "分" : h + "小时") : mm + "分钟";
+      return `<div class="best-range"><span>${timeStr}</span><span class="range-len">${dur}</span></div>`;
+    }).join("");
+    return `<div class="best-day${open ? " open" : ""}" data-ds="${r.ds}">
+      <div class="best-day-head">
+        <div class="best-day-title">${d.getMonth() + 1}月${d.getDate()}日<span class="wd">周${weekdayOf(d)}</span></div>
+        <div class="best-day-meta">${total}人全员 · ${r.fullIdx.length}个时段</div>
+        <div class="best-arrow">›</div>
+      </div>
+      <div class="best-day-body">${rangesHtml}</div>
+    </div>`;
+  }).join("");
+  list.querySelectorAll(".best-day-head").forEach(h => {
+    h.addEventListener("click", () => {
+      const ds = h.parentElement.dataset.ds;
+      app.bestOpen[ds] = !app.bestOpen[ds];
+      renderBestSlots();
     });
   });
-  results.sort((a,b) => a.ds === b.ds ? a.si - b.si : a.ds.localeCompare(b.ds));
-  const merged = [];
-  for (const r of results) {
-    const last = merged[merged.length-1];
-    if (last && last.ds === r.ds && last.si + last.len === r.si && last.count === r.count) {
-      last.len++;
-      last.endT = r.t + p.precision;
-    } else {
-      merged.push({ ds: r.ds, si: r.si, len: 1, count: r.count, startT: r.t, endT: r.t + p.precision });
-    }
-  }
-  const valid = merged.filter(m => m.count > 0).sort((a,b) => b.count - a.count || b.len - a.len).slice(0, 8);
-  const total = names.length;
-  list.innerHTML = valid.map(m => {
-    const d = fromYmd(m.ds);
-    const timeStr = min2t(m.startT) + "–" + (m.endT >= 1440 ? "24:00" : min2t(m.endT));
-    const full = m.count === total;
-    const pct = Math.round(m.count / total * 100);
-    return `<div class="best-slot ${full?"full":""}">
-      <div class="slot-time">${d.getMonth()+1}月${d.getDate()}日 ${timeStr}</div>
-      <div class="slot-people">${full ? total+"人全部空闲" : m.count+"/"+total+" 空闲"}</div>
-      <div class="slot-bar"><div class="slot-bar-fill" style="width:${pct}%"></div></div>
-    </div>`;
-  }).join("") || `<div style="font-size:13px;color:var(--ink-4);padding:8px 0">暂无重叠空闲时段</div>`;
 }
 
 /* ============================================================
