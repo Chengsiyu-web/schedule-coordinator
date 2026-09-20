@@ -464,7 +464,7 @@
   body.day-mode .schedule-row .time-label.sub { color: transparent; }
   /* 单日模式：表格宽度=屏幕宽度，横向彻底锁死（纵向留兜底） */
   body.day-mode #gridWrap { overflow-x: hidden; overflow-y: auto; }
-  body.day-mode #scheduleTable { width: 100%; }
+  body.day-mode #scheduleTable { width: 100%; max-width: 340px; min-width: 0; margin: 0 auto; }
 
   /* 全天有空快捷键 */
   .day-actions { padding: 0 0 10px; display: flex; }
