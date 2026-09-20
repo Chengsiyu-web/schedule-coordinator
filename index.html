@@ -461,7 +461,6 @@
   }
   body.day-mode .schedule-cell.on { background: var(--blue); }
   body.day-mode .schedule-row { height: var(--day-cell-h, 44px); }
-  body.day-mode .schedule-row .time-label.sub { color: transparent; }
   /* 单日模式：表格宽度=屏幕宽度，横向彻底锁死（纵向留兜底） */
   body.day-mode #gridWrap { overflow-x: hidden; overflow-y: auto; }
   body.day-mode #scheduleTable { width: 100%; max-width: 340px; min-width: 0; margin: 0 auto; }
@@ -1401,7 +1400,7 @@ function renderGrid() {
       return `<div class="${cls}" data-date="${ds}" data-slot="${si}"></div>`;
     }).join("");
     return `<div class="schedule-row">
-      <div class="time-label${dayMode && t % 60 !== 0 ? " sub" : ""}">${dayMode && t % 60 !== 0 ? "·" : min2t(t)}</div>${cells}
+      <div class="time-label">${min2t(t)}</div>${cells}
     </div>`;
   }).join("");
   const wrap = document.getElementById("gridWrap");
