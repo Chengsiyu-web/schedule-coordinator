@@ -1387,9 +1387,15 @@ function renderGrid() {
     const vh = window.visualViewport ? window.visualViewport.height : window.innerHeight;
     const fixedH = ["day-strip", "day-actions", "schedule-header"]
       .reduce((sum, cls) => sum + (table.querySelector("." + cls) ? table.querySelector("." + cls).offsetHeight : 0), 0);
-    const avail = vh - wrap.getBoundingClientRect().top - fixedH - 12;
+    // getBoundingClientRect 是相对视口的，页面滚动后会是负数把行高撑爆；转成文档坐标
+    const wrapTopDoc = wrap.getBoundingClientRect().top + (window.scrollY || window.pageYOffset || 0);
+    const avail = vh - wrapTopDoc - fixedH - 12;
     const cellH = Math.max(16, Math.min(56, Math.floor(avail / Math.max(1, slots.length))));
     table.style.setProperty("--day-cell-h", cellH + "px");
+    const activeChip = table.querySelector(".day-chip.active");
+    if (activeChip && activeChip.scrollIntoView) {
+      try { activeChip.scrollIntoView({ inline: "center", block: "nearest" }); } catch (_) { activeChip.scrollIntoView(); }
+    }
     table.querySelectorAll(".day-chip").forEach(ch => {
       ch.addEventListener("click", () => { app.dayIndex = Number(ch.dataset.day); renderGrid(); });
     });
