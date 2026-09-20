@@ -1363,11 +1363,11 @@ function renderGrid() {
     const mineKeys = slotsOf(p, app.currentUser);
     const daySlotCount = slots.length;
     const dayMarked = mineKeys.filter(k => k.startsWith(ds + "|")).length;
-    const stateText = dayMarked === 0 ? "未标" : (dayMarked === daySlotCount ? "全部有空" : "已标" + dayMarked + "格");
+    const stateText = dayMarked === 0 ? "没空" : "已标";
     header = `<div class="day-strip">` + p.dates.map((s, i) => {
       const dd = fromYmd(s);
       const marked = mineKeys.filter(k => k.startsWith(s + "|")).length;
-      const st = marked === 0 ? "未标" : (marked === daySlotCount ? "有空" : "已标" + marked);
+      const st = marked === 0 ? "没空" : "已标";
       return `<div class="day-chip${i === app.dayIndex ? " active" : ""}" data-day="${i}">
         <div class="d1">${dd.getMonth()+1}月${dd.getDate()}日</div>
         <div class="d2">周${weekdayOf(dd)} · ${st}</div>
@@ -1477,7 +1477,7 @@ function updateDayChips() {
   document.querySelectorAll(".day-chip").forEach(ch => {
     const s = p.dates[Number(ch.dataset.day)];
     const marked = mineKeys.filter(k => k.startsWith(s + "|")).length;
-    const st = marked === 0 ? "未标" : (marked === daySlotCount ? "有空" : "已标" + marked);
+    const st = marked === 0 ? "没空" : "已标";
     const d2 = ch.querySelector(".d2");
     if (d2) d2.textContent = "周" + weekdayOf(fromYmd(s)) + " · " + st;
   });
