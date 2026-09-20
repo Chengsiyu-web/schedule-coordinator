@@ -413,6 +413,7 @@
   body.mode-mine.edit-mode .schedule-cell { touch-action: none; }
 
   body:not(.mode-mine) .edit-toggle { display: none; }
+  body.day-mode .edit-toggle { display: none; }
   .edit-toggle {
     margin-left: auto;
     padding: 6px 14px; border-radius: 999px;
@@ -435,6 +436,29 @@
   body.mode-summary .schedule-cell.h4 { background: var(--heat-4); }
   body.mode-summary .schedule-cell.h5 { background: var(--heat-5); }
   body.mode-summary .schedule-cell.highlight { box-shadow: inset 0 0 0 2px var(--ink); }
+
+  /* ============ 多天单日模式（手机） ============ */
+  .day-strip {
+    display: flex; gap: 8px; overflow-x: auto; padding: 2px 2px 12px;
+    scrollbar-width: none; -webkit-overflow-scrolling: touch;
+  }
+  .day-strip::-webkit-scrollbar { display: none; }
+  .day-chip {
+    flex: 0 0 auto; padding: 9px 16px; border-radius: 14px;
+    border: 1px solid var(--line-soft); background: var(--card);
+    text-align: center; cursor: pointer; transition: all .15s;
+  }
+  .day-chip.active { background: var(--blue); border-color: var(--blue); }
+  .day-chip .d1 { font-size: 14px; font-weight: 600; color: var(--ink); }
+  .day-chip .d2 { font-size: 11px; color: var(--ink-4); margin-top: 2px; }
+  .day-chip.active .d1, .day-chip.active .d2 { color: #fff; }
+  .day-chip.active .d2 { color: rgba(255,255,255,0.75); }
+  body.day-mode .schedule-cell {
+    height: var(--day-cell-h, 44px); flex: 1 1 auto; min-width: 0;
+    touch-action: none;
+  }
+  body.day-mode .schedule-cell.on { background: var(--blue); }
+  body.day-mode .schedule-row { height: var(--day-cell-h, 44px); }
 
   .cell-popover {
     position: absolute; z-index: 20; background: var(--card);
@@ -1259,19 +1283,53 @@ function timeSlots() {
 /* ============================================================
    网格渲染
    ============================================================ */
+// 手机 + 超过4天：切换为「日期条 + 单日大格子」模式，格子高度自适应铺满一屏，拖动涂色零冲突
+function isDayMode() {
+  return app.mode === "mine" && app.project && app.project.dates.length > 4 && window.innerWidth < 700;
+}
+
 function renderGrid() {
   const p = app.project;
   const slots = timeSlots();
   const table = document.getElementById("scheduleTable");
-  const header = `<div class="schedule-header">
-    <div class="corner-cell"></div>
-    ${p.dates.map(ds => {
-      const d = fromYmd(ds);
-      return `<div class="date-header">${d.getMonth()+1}月${d.getDate()}日<div class="weekday">周${weekdayOf(d)}</div></div>`;
-    }).join("")}
-  </div>`;
+  const dayMode = isDayMode();
+  document.body.classList.toggle("day-mode", dayMode);
+  let header;
+  let days;
+  if (dayMode) {
+    if (app.dayIndex == null || app.dayIndex >= p.dates.length) app.dayIndex = 0;
+    days = [p.dates[app.dayIndex]];
+    const ds = days[0];
+    const d = fromYmd(ds);
+    const mineKeys = slotsOf(p, app.currentUser);
+    header = `<div class="day-strip">` + p.dates.map((s, i) => {
+      const dd = fromYmd(s);
+      const marked = mineKeys.filter(k => k.startsWith(s + "|")).length;
+      return `<div class="day-chip${i === app.dayIndex ? " active" : ""}" data-day="${i}">
+        <div class="d1">${dd.getMonth()+1}月${dd.getDate()}日</div>
+        <div class="d2">周${weekdayOf(dd)}${marked ? " · 已标" + marked + "格" : ""}</div>
+      </div>`;
+    }).join("") + `</div>
+    <div class="schedule-header">
+      <div class="corner-cell"></div>
+      <div class="date-header">${d.getMonth()+1}月${d.getDate()}日<div class="weekday">周${weekdayOf(d)}</div></div>
+    </div>`;
+    // 格子高度自适应：去掉顶部区域后刚好铺满一屏，无需滚动
+    const chrome = 330;
+    const cellH = Math.max(34, Math.min(56, Math.floor((window.innerHeight - chrome) / Math.max(1, slots.length))));
+    table.style.setProperty("--day-cell-h", cellH + "px");
+  } else {
+    days = p.dates;
+    header = `<div class="schedule-header">
+      <div class="corner-cell"></div>
+      ${p.dates.map(ds => {
+        const d = fromYmd(ds);
+        return `<div class="date-header">${d.getMonth()+1}月${d.getDate()}日<div class="weekday">周${weekdayOf(d)}</div></div>`;
+      }).join("")}
+    </div>`;
+  }
   const rows = slots.map((t, si) => {
-    const cells = p.dates.map((ds) => {
+    const cells = days.map((ds) => {
       const key = ds + "|" + si;
       let cls = "schedule-cell";
       const mine = app.currentUser && p.participants[app.currentUser] && p.participants[app.currentUser][key];
@@ -1290,6 +1348,11 @@ function renderGrid() {
   const st = wrap.scrollTop, sl = wrap.scrollLeft;
   table.innerHTML = header + rows;
   wrap.scrollTop = st; wrap.scrollLeft = sl;
+  if (dayMode) {
+    table.querySelectorAll(".day-chip").forEach(ch => {
+      ch.addEventListener("click", () => { app.dayIndex = Number(ch.dataset.day); renderGrid(); });
+    });
+  }
   bindGridInteraction();
 }
 
@@ -1398,8 +1461,8 @@ function onDown(e) {
   if (app.mode === "summary") { showPopover(cell); return; }
   if (app.mode !== "mine") return;
   if (!app.currentUser) { showToast("请先输入你的名字"); switchUser(); return; }
-  // 手机浏览态：不立即涂色，等抬起时判断是「轻点」还是「滑动看表」
-  if (e.pointerType === "touch" && !editMode) {
+  // 手机浏览态：不立即涂色，等抬起时判断是「轻点」还是「滑动看表」；单日模式格子铺满一屏，直接拖涂
+  if (e.pointerType === "touch" && !editMode && !isDayMode()) {
     gridDrag.pendingTap = { x: e.clientX, y: e.clientY, cell, key: cell.dataset.date + "|" + cell.dataset.slot, moved: false };
     return;
   }
@@ -1439,6 +1502,7 @@ function onUp(e) {
       const mine = app.project.participants[app.currentUser] && app.project.participants[app.currentUser][t.key];
       applyCell(t.cell, !mine);
       renderBestSlots();
+      renderParticipants();
       if (uploadTimer) { clearTimeout(uploadTimer); uploadTimer = null; }
       uploadMySlots();
     }
@@ -1448,6 +1512,7 @@ function onUp(e) {
     gridDrag.active = false;
     try { const w = document.getElementById("gridWrap"); w.releasePointerCapture(e.pointerId); } catch(_){}
     renderBestSlots();
+    renderParticipants();
     if (uploadTimer) { clearTimeout(uploadTimer); uploadTimer = null; uploadMySlots(); }
   }
 }
@@ -1715,6 +1780,13 @@ function bindEvents() {
     updateConnStatus();
     if (r.ok) showToast("已连接到实时协作服务器", 1500);
   }
+
+  // 窗口尺寸变化（如手机旋转）时重算单日模式与格子高度
+  let resizeT = null;
+  window.addEventListener("resize", () => {
+    if (resizeT) clearTimeout(resizeT);
+    resizeT = setTimeout(() => { if (app.view === "project" && app.project) renderGrid(); }, 150);
+  });
 
   // URL hash 直达项目
   const h = location.hash.match(/project=(p_[A-Za-z0-9]+)/);
